@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kraken Average Calculator</title>
+  <script src=" https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js "></script>
+  <link href=" https://cdn.jsdelivr.net/npm/papaparse@5.4.1/player/player.min.css " rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css" />
+</head>
+
+<body>
+  <main class="container">
+    <h1>Kraken Average Calculator</h1>
+    <form>
+      <fieldset class="grid" style="align-items: last baseline;">
+        <label>
+          Ledgers.csv (required)
+          <input type="file" id="ledger-file" accept="text/csv" />
+        </label>
+        <label>
+          Start date (optional)
+          <input type="date" id="start-date" />
+        </label>
+        <label>
+          End date (optional)
+          <input type="date" id="end-date" />
+        </label>
+        <input type="submit" value="Submit" onclick="event.preventDefault();handleSubmit()" />
+      </fieldset>
+    </form>
+
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Assets pair</th>
+          <th scope="col">Average buy price</th>
+          <th scope="col">Average sell price</th>
+        </tr>
+      </thead>
+      <tbody id="table-body">
+      </tbody>
+    </table>
+  </main>
+</body>
+
+<script>
+  function handleSubmit() {
+    const [file] = document.getElementById("ledger-file").files
+    const reader = new FileReader()
+
+    reader.onload = () => {
+      const transactionsCsv = reader.result
+      const transactions = Papa.parse(transactionsCsv, {
+        header: true,
+        skipEmptyLines: true
+      });
+
+      let startDate = document.getElementById("start-date").value
+      if (startDate == "") startDate = document.getElementById("start-date").value = transactions.data[0].time.substring(0, 10)
+      let endDate = document.getElementById("end-date").value
+      if (endDate == "") endDate = document.getElementById("end-date").value = transactions.data[transactions.data.length - 1].time.substring(0, 10)
+
+      let v = transactions.data
+        .filter(({ type }) => type === "spend" || type === "receive" || type === "trade")
+        .filter(({ time }) => time > startDate && time < endDate)
+      v = Object.groupBy(v, ({ time }) => time)
+      v = Object.entries(v).map(([time, v]) => ({
+        time: time,
+        pair: [v[0].asset, v[1].asset],
+        fromQty: -Number(v[0].amount) + Number(v[0].fee),
+        toQty: Number(v[1].amount)
+      }))
+      v = Object.groupBy(v, ({ pair }) => pair.toSorted())
+      v = Object.entries(v).map(([pair, transactions]) => {
+        temp = Object.groupBy(transactions, ({ pair }) => pair)
+        let [buyPair, sellPair] = Object.keys(temp).toSorted((a, b) => {
+          if (a == "EUR" || a == "USD" || a == "GBP") return -1
+          else if (b == "EUR" || b == "USD" || b == "GBP") return 1
+          else if (a.startsWith("EUR") || a.startsWith("USD") || a.startsWith("GBP")) return -1
+          else if (b.startsWith("EUR") || b.startsWith("USD") || b.startsWith("GBP")) return 1
+          return 0
+        })
+        return {
+          pair: buyPair || sellPair,
+          avgBuy: temp[buyPair]?.reduce((acc, transaction) => acc + transaction.fromQty / transaction.toQty, 0) / temp[buyPair]?.length,
+          avgSell: temp[sellPair]?.reduce((acc, transaction) => acc + transaction.toQty / transaction.fromQty, 0) / temp[sellPair]?.length
+        }
+      })
+
+      document.getElementById("table-body").innerHTML = v.map(({ pair, avgBuy, avgSell }) => `
+      <tr>
+        <th scope="row">${pair}</th>
+        <td>${avgBuy || ""}</td>
+        <td>${avgSell || ""}</td>
+      </tr>
+    `).join('')
+    };
+
+    if (file) reader.readAsText(file)
+  }
+</script>
+
+</html>
